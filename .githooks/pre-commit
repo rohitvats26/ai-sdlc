@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Commit guard (works whether the code came from Copilot, a human or anything else).
+# Enable once: git config core.hooksPath .githooks
+# Blocks the commit when: tests fail, a step prompt is broken, no prompt was logged since the last commit, findings are invalid,
+# or the AI log has errors. Then it refreshes the readable log and adds the log files to this commit.
+set -u
+here="$(cd "$(dirname "$0")" && pwd)"
+py="$("$here/find-python.sh")"
+
+test_cmd="${INVOICE_TEST_CMD:-mvn -q -B test}"
+if ! out="$(bash -c "$test_cmd" 2>&1)"; then
+  echo "pre-commit: unit tests failing, commit blocked" >&2; echo "$out" | tail -25 >&2; exit 1
+fi
+
+if [ -z "$py" ]; then
+  echo "pre-commit: Python not found, skipped AI log and findings checks" >&2
+  exit 0
+fi
+
+if git diff --cached --name-only | grep -q '^\.github/prompts/'; then
+  "$py" scripts/check_prompts.py || { echo "pre-commit: a step prompt is broken (see errors above)" >&2; exit 1; }
+fi
+"$py" scripts/ai_log.py check-commit || { echo "pre-commit: log the prompt(s) you just ran, then commit again" >&2; exit 1; }
+if [ -f docs/review/findings.json ]; then
+  "$py" scripts/hooks/validate-findings.py docs/review/findings.json || { echo "pre-commit: findings.json invalid" >&2; exit 1; }
+fi
+if [ -s docs/ai-log/ai-log.jsonl ]; then
+  "$py" scripts/ai_log.py validate || { echo "pre-commit: AI log has errors" >&2; exit 1; }
+  "$py" scripts/ai_log.py render >/dev/null 2>&1
+  git add docs/ai-log docs/ai-interaction-log.md >/dev/null 2>&1
+fi
+exit 0
