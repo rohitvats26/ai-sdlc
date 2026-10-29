@@ -1,0 +1,9 @@
+target/
+*.class
+.idea/
+.vscode/
+*.iml
+node_modules/
+.env
+test-results/
+playwright-report/
