@@ -1,0 +1,30 @@
+[
+  {
+    "id": "FR-01",
+    "severity": "medium",
+    "file": "src/main/java/com/example/invoiceapp/domain/ApprovalPolicy.java",
+    "line": 37,
+    "title": "Large-invoice approval rule is split out of the policy and the policy itself rejects valid approvals",
+    "description": "ApprovalPolicy.validate() ends with a catch-all that rejects any invoice above 500000, but ApprovalService.approve() works around this by checking `amount.compareTo(DIRECTOR_LIMIT) > 0` and routing to `approveLargeInvoice()`. The policy object is therefore not the source of truth for the rule, and a direct call or future refactor could reject valid approvals without an explicit test. The current unit suite exercises the service path, not the policy class itself.",
+    "suggested_fix": "Move the large-invoice rule into ApprovalPolicy.validate() (or have it express the exact rule for all amount bands), and add direct parameterized tests for 50,000, 50,000.01, 500,000 and 500,000.01 so the policy and service remain consistent.",
+    "confidence": "high",
+    "unsure_about": "Whether the team intentionally treats the policy as advisory rather than authoritative; the code suggests it is meant to be authoritative.",
+    "verdict": "pending",
+    "verdict_reason": "",
+    "resolution": ""
+  },
+  {
+    "id": "FR-02",
+    "severity": "low",
+    "file": "src/main/java/com/example/invoiceapp/domain/ApprovalPolicy.java",
+    "line": 36,
+    "title": "Director-only rejection message names the wrong threshold",
+    "description": "The second branch reports the threshold as `MANAGER_LIMIT` (`50000`) even though it is the Director-only band (`500000`). A user rejected at 500000.01 would see a misleading message referencing 50,000 instead of the actual rule.",
+    "suggested_fix": "Change the formatted threshold in the second rejection to `DIRECTOR_LIMIT` (500,000) so the message matches the policy and the spec.",
+    "confidence": "high",
+    "unsure_about": "Whether this is user-visible in the current API surface (it is returned from the domain exception and then serialized as an error message).",
+    "verdict": "pending",
+    "verdict_reason": "",
+    "resolution": ""
+  }
+]
