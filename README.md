@@ -35,10 +35,11 @@ Built in steps 2 and 3. Amounts use `BigDecimal` and are compared exactly.
 | --- | --- | --- |
 | up to and including 50,000 | Manager or Director | 1 |
 | above 50,000, up to and including 500,000 | Director only | 1 |
-| above 500,000 | two different users; the second must be a Director | 2 |
+| above 500,000 | first approver must be a Director; second approver must also be a Director and must be different from the first | 2 |
 
 - The same user never counts twice (case and surrounding spaces are ignored).
 - A refused attempt returns a clear reason (HTTP 403 with `{ "error": ... }`) and changes nothing on the invoice.
+- The first approval above 500,000 keeps the invoice pending and records the approval; the second valid Director finalizes it.
 - The invoices table shows approvals recorded out of required, for example `1 of 2`.
 
 Before the feature is built, the app still approves any invoice for any Approver or Admin.

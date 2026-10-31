@@ -4,6 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -81,7 +87,7 @@ class ApprovalServiceTest {
     }
 
     @Test
-    void director_rejectedAbove500000WithoutMutation() {
+    void manager_rejectedAsFirstApproverAbove500000WithoutMutation() {
         Invoice invoice = invoiceWith("INV-1", new BigDecimal("500000.01"), InvoiceStatus.PENDING_APPROVAL);
         ApprovalService service = serviceFor(invoice);
         Invoice snapshot = new Invoice("INV-1", invoice.getCustomerName(), invoice.getAmount(), invoice.getStatus());
@@ -90,11 +96,9 @@ class ApprovalServiceTest {
         snapshot.setDecidedAt(invoice.getDecidedAt());
         snapshot.setApprovals(invoice.getApprovals());
 
-        assertThatThrownBy(() -> service.approve("INV-1", new Approver("demo.director", ApproverRole.DIRECTOR)))
+        assertThatThrownBy(() -> service.approve("INV-1", new Approver("demo.manager", ApproverRole.MANAGER)))
                 .isInstanceOf(ApprovalRejectedException.class)
-                .hasMessageContaining("INV-1")
-                .hasMessageContaining("500,000")
-                .hasMessageContaining("500000.01");
+                .hasMessageContaining("first approver above 500,000 must be a Director");
         assertUnchanged(snapshot, invoice);
     }
 
@@ -177,5 +181,96 @@ class ApprovalServiceTest {
         ApprovalService service = serviceFor(invoiceWith("INV-1", new BigDecimal("100.00"), InvoiceStatus.PENDING_APPROVAL));
 
         assertThatThrownBy(() -> service.reject("INV-1", "demo.manager", "  ")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void firstApprovalAbove500000_keepsInvoicePending() {
+        Invoice invoice = invoiceWith("INV-1", new BigDecimal("600000.00"), InvoiceStatus.PENDING_APPROVAL);
+        ApprovalService service = serviceFor(invoice);
+
+        Invoice result = service.approve("INV-1", new Approver("demo.director", ApproverRole.DIRECTOR));
+
+        assertThat(result.getStatus()).isEqualTo(InvoiceStatus.PENDING_APPROVAL);
+        assertThat(result.getDecidedBy()).isNull();
+        assertThat(result.getDecidedAt()).isNull();
+        assertThat(result.getApprovals()).hasSize(1);
+    }
+
+    @Test
+    void secondDirectorCompletesApprovalAbove500000() {
+        Invoice invoice = invoiceWith("INV-1", new BigDecimal("600000.00"), InvoiceStatus.PENDING_APPROVAL);
+        ApprovalService service = serviceFor(invoice);
+        service.approve("INV-1", new Approver("demo.director", ApproverRole.DIRECTOR));
+
+        Invoice result = service.approve("INV-1", new Approver("demo.director2", ApproverRole.DIRECTOR));
+
+        assertThat(result.getStatus()).isEqualTo(InvoiceStatus.APPROVED);
+        assertThat(result.getDecidedBy()).isEqualTo("demo.director2");
+        assertThat(result.getDecidedAt()).isNotNull();
+        assertThat(result.getApprovals()).hasSize(2);
+    }
+
+    @Test
+    void managerCannotBeSecondApproverAbove500000() {
+        Invoice invoice = invoiceWith("INV-1", new BigDecimal("600000.00"), InvoiceStatus.PENDING_APPROVAL);
+        ApprovalService service = serviceFor(invoice);
+        service.approve("INV-1", new Approver("demo.director", ApproverRole.DIRECTOR));
+        Invoice snapshot = new Invoice("INV-1", invoice.getCustomerName(), invoice.getAmount(), invoice.getStatus());
+        snapshot.setDecisionNote(invoice.getDecisionNote());
+        snapshot.setDecidedBy(invoice.getDecidedBy());
+        snapshot.setDecidedAt(invoice.getDecidedAt());
+        snapshot.setApprovals(invoice.getApprovals());
+
+        assertThatThrownBy(() -> service.approve("INV-1", new Approver("demo.manager", ApproverRole.MANAGER)))
+                .isInstanceOf(ApprovalRejectedException.class)
+                .hasMessageContaining("second approver must be a Director");
+        assertUnchanged(snapshot, invoice);
+    }
+
+    @Test
+    void sameUserCannotCountTwiceAbove500000() {
+        Invoice invoice = invoiceWith("INV-1", new BigDecimal("600000.00"), InvoiceStatus.PENDING_APPROVAL);
+        ApprovalService service = serviceFor(invoice);
+        service.approve("INV-1", new Approver("  demo.director  ", ApproverRole.DIRECTOR));
+        Invoice snapshot = new Invoice("INV-1", invoice.getCustomerName(), invoice.getAmount(), invoice.getStatus());
+        snapshot.setDecisionNote(invoice.getDecisionNote());
+        snapshot.setDecidedBy(invoice.getDecidedBy());
+        snapshot.setDecidedAt(invoice.getDecidedAt());
+        snapshot.setApprovals(invoice.getApprovals());
+
+        assertThatThrownBy(() -> service.approve("INV-1", new Approver("Demo.Director", ApproverRole.DIRECTOR)))
+                .isInstanceOf(ApprovalRejectedException.class)
+                .hasMessageContaining("Same approver cannot count twice");
+        assertUnchanged(snapshot, invoice);
+    }
+
+    @Test
+    void concurrent_sameUserApproval_isRecordedOnce() throws Exception {
+        Invoice invoice = invoiceWith("INV-1", new BigDecimal("600000.00"), InvoiceStatus.PENDING_APPROVAL);
+        ApprovalService service = serviceFor(invoice);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Throwable> failures = new ArrayList<>();
+
+        for (int i = 0; i < 2; i++) {
+            executor.submit(() -> {
+                ready.countDown();
+                try {
+                    start.await();
+                    service.approve("INV-1", new Approver(" demo.director ", ApproverRole.DIRECTOR));
+                } catch (Throwable ex) {
+                    failures.add(ex);
+                }
+            });
+        }
+
+        ready.await();
+        start.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(invoice.getApprovals()).hasSize(1);
+        assertThat(invoice.getStatus()).isEqualTo(InvoiceStatus.PENDING_APPROVAL);
+        assertThat(failures).hasSize(1);
     }
 }
