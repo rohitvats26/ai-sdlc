@@ -19,12 +19,33 @@
     const response = await fetch(`/api${path}`, { ...options, headers });
     if (response.status === 401 && session) { signOut(); throw new Error('Session expired.'); }
     const body = response.status === 204 ? null : await response.json().catch(() => null);
-    if (!response.ok) throw new Error((body && body.error) || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const message = (body && body.error) || (response.status === 403 ? 'You do not have permission to do that.' : `Request failed (${response.status})`);
+      throw new Error(message);
+    }
     return body;
   }
 
   function show(id, visible) { $(id).hidden = !visible; }
   function showError(id, message) { const p = $(id); p.textContent = message || ''; p.hidden = !message; }
+
+  function requiredApprovals(amount) {
+    const value = Number(amount || 0);
+    if (value <= 50000) return 1;
+    if (value <= 500000) return 1;
+    return 2;
+  }
+
+  function approvalSummary(invoice) {
+    const approved = Array.isArray(invoice.approvals) ? invoice.approvals.length : 0;
+    return `${approved} of ${requiredApprovals(invoice.amount)}`;
+  }
+
+  function approvalNames(invoice) {
+    const approvals = Array.isArray(invoice.approvals) ? invoice.approvals : [];
+    if (approvals.length === 0) return 'No approvals recorded yet';
+    return approvals.map((record) => `${record.username} (${record.role})`).join(', ');
+  }
 
   function render() {
     const signedIn = !!session;
@@ -57,6 +78,7 @@
         el('td', {}, invoice.customerName),
         el('td', {}, money.format(invoice.amount)),
         el('td', { class: `status status-${invoice.status}` }, invoice.status.replace(/([a-z])([A-Z])/g, '$1 $2')),
+        el('td', {}, approvalSummary(invoice)),
         actions);
     }));
   }
@@ -73,8 +95,9 @@
       reject.addEventListener('click', () => decide(`/approvals/${invoice.id}/reject`, { reason: reason.value }));
 
       return el('li', {},
-        el('span', {}, `${invoice.id} · ${invoice.customerName} · ${money.format(invoice.amount)}`),
+        el('span', {}, `${invoice.id} · ${invoice.customerName} · ${money.format(invoice.amount)} · ${approvalSummary(invoice)}`),
         el('span', {}, approve),
+        el('div', { class: 'approval-records' }, approvalNames(invoice)),
         el('div', { class: 'reject-row' }, reason, reject));
     }));
   }
