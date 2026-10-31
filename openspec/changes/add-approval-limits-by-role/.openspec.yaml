@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-31
+goal: Enforce approval limits by role before invoice decisions are finalized.
