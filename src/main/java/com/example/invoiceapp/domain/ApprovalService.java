@@ -27,18 +27,25 @@ public class ApprovalService {
         return invoice;
     }
 
-    public Invoice approve(String invoiceId, String approver) {
+    public Invoice approve(String invoiceId, Approver approver) {
         Invoice invoice = find(invoiceId);
         ensurePending(invoice);
+        ApprovalPolicy.validate(invoice, approver);
 
+        Instant now = Instant.now();
         invoice.setStatus(InvoiceStatus.APPROVED);
-        invoice.setDecidedBy(approver);
-        invoice.setDecidedAt(Instant.now());
+        invoice.setDecidedBy(approver.getUsername());
+        invoice.setDecidedAt(now);
+        invoice.getApprovals().add(new ApprovalRecord(approver.getUsername(), approver.getRole(), now));
         repository.update(invoice);
         return invoice;
     }
 
-    public Invoice reject(String invoiceId, String approver, String reason) {
+    public Invoice approve(String invoiceId, String approver) {
+        return approve(invoiceId, new Approver(approver, ApproverRole.MANAGER));
+    }
+
+    public Invoice reject(String invoiceId, Approver approver, String reason) {
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("A reason is required to reject an invoice.");
         }
@@ -47,11 +54,15 @@ public class ApprovalService {
         ensurePending(invoice);
 
         invoice.setStatus(InvoiceStatus.REJECTED);
-        invoice.setDecidedBy(approver);
+        invoice.setDecidedBy(approver == null ? "" : approver.getUsername());
         invoice.setDecidedAt(Instant.now());
         invoice.setDecisionNote(reason);
         repository.update(invoice);
         return invoice;
+    }
+
+    public Invoice reject(String invoiceId, String approver, String reason) {
+        return reject(invoiceId, new Approver(approver, ApproverRole.MANAGER), reason);
     }
 
     private Invoice find(String invoiceId) {

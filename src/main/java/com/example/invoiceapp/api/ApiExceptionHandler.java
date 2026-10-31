@@ -8,6 +8,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import com.example.invoiceapp.domain.ApprovalRejectedException;
 import com.example.invoiceapp.domain.InvalidInvoiceStateException;
 import com.example.invoiceapp.domain.InvoiceNotFoundException;
 
@@ -23,6 +24,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidInvoiceStateException.class)
     public ResponseEntity<Map<String, String>> conflict(InvalidInvoiceStateException ex) {
         return body(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(ApprovalRejectedException.class)
+    public ResponseEntity<Map<String, String>> rejected(ApprovalRejectedException ex) {
+        return body(HttpStatus.FORBIDDEN, ex.getMessage());
     }
 
     @ExceptionHandler({IllegalArgumentException.class, HttpMessageNotReadableException.class})
